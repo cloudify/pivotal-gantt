@@ -1,0 +1,4 @@
+*.eps
+*.png
+*.svg
+node_modules

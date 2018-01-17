@@ -1,0 +1,15 @@
+{
+  "name": "pivotal-gantt",
+  "version": "1.0.0",
+  "description": "Pivotal to GANTT",
+  "main": "index.ts",
+  "author": "Federico Feroldi",
+  "license": "MIT",
+  "dependencies": {
+    "moment": "^2.20.1",
+    "pivotaltracker": "file:../pivotaltracker"
+  },
+  "devDependencies": {
+    "eslint": "^4.15.0"
+  }
+}
