@@ -24,6 +24,8 @@ async function run() {
   console.error("Getting project epics");
   const epics = await getProjectEpics(projectId);
 
+  console.error(`#stories=${stories.length} #epics=${epics.length}`);
+
   console.error("Processing stories");
   const storiesForLabel = {};
   stories.forEach(s => {
@@ -35,6 +37,8 @@ async function run() {
       storiesForLabel[l.name].push(s);
     })
   });
+
+  // console.log(storiesForLabel['epic-technical-debt'].map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1));
 
   console.log("@startgantt");
   const projectCreatedAt = moment(project.createdAt);
@@ -56,7 +60,7 @@ async function run() {
       const totAcceptedStories = epicStories.filter(e => e.currentState === "accepted").length;
       const completedPercent = totStories > 0 ? Math.ceil(100.0 * totAcceptedStories / totStories) : 0;
 
-      const firstStoryCreatedAt = epicStories.map(s => s.createdAt).sort()[0];
+      const firstStoryCreatedAt = epicStories.map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1)[0];
       const epicCreatedAt = moment(firstStoryCreatedAt);
 
       const epicName = `${epic.name} (${completedPercent}% completa)`;
@@ -116,6 +120,32 @@ async function getEpic(projectId, epicId) {
 async function getProjectStories(projectId) {
   return new Promise((res, rej) => {
     client.project(projectId).stories.all({limit: 999}, (err, stories) => {
+      if(err) {
+        return rej(err);
+      }
+      res(stories);
+    });
+  });
+}
+
+async function getProjectStoriesPage(projectId) {
+  const limit = 100;
+  var offset = 0;
+  const stories = [];
+  while(true) {
+    const someStories = await getProjectStoriesPage(projectId, limit, offset);
+    if(someStories.length == 0) {
+      return stories;
+    } else {
+      stories.push(...someStories);
+      offset += limit;
+    }
+  }
+}
+
+async function getProjectStoriesPage(projectId, limit, offset) {
+  return new Promise((res, rej) => {
+    client.project(projectId).stories.all({limit, offset}, (err, stories) => {
       if(err) {
         return rej(err);
       }
