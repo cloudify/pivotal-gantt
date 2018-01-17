@@ -46,13 +46,21 @@ async function run() {
     }
 
     if(epic.createdAt && (epic.projectedCompletion || epic.completedAt)) {
-      const epicCreatedAt = moment(epic.createdAt);
+      // const epicCreatedAt = moment(epic.createdAt);
       const epicStories = storiesForLabel[epic.label.name] || [];
       const totStories = epicStories.length;
-      // console.log(epicStories);
+      if(totStories == 0) {
+        return;
+      }
+
       const totAcceptedStories = epicStories.filter(e => e.currentState === "accepted").length;
       const completedPercent = totStories > 0 ? Math.ceil(100.0 * totAcceptedStories / totStories) : 0;
+
+      const firstStoryCreatedAt = epicStories.map(s => s.createdAt).sort()[0];
+      const epicCreatedAt = moment(firstStoryCreatedAt);
+
       const epicName = `${epic.name} (${completedPercent}% completa)`;
+
       if(epic.projectedCompletion) {
         const epicProjectedCompletion = moment(epic.projectedCompletion);
         const epicDuration = moment.duration(epicProjectedCompletion.diff(epicCreatedAt));
