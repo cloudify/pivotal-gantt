@@ -4,6 +4,7 @@ const fs = require("fs");
 // const util = require("util");
 
 const dateFormat = "Do MMMM YYYY";
+const dateSort = (a,b) => moment(a).isAfter(b) ? 1 : -1;
 
 const client = new tracker.Client(process.env.PIVOTAL_TRACKER_TOKEN);
 
@@ -41,14 +42,13 @@ async function run() {
   // console.log(storiesForLabel['epic-technical-debt'].map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1));
 
   console.log("@startgantt");
-  const projectCreatedAt = moment(stories.map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1)[0]);
+  const projectCreatedAt = moment(project.createdAt); // moment(stories.map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1)[0]);
   console.log(`Project starts the ${projectCreatedAt.format(dateFormat)}`);
-  epics.forEach(async epic => {
+  const items = await Promise.all(epics.map(async epic => {
     if(epic.description && epic.description.indexOf("*SKIP_GANTT*") > -1) {
       console.error(`Skipping epic: ${epic.name}`);
       return;
     }
-
 
     if(epic.createdAt && (epic.projectedCompletion || epic.completedAt)) {
       // const epicCreatedAt = moment(epic.createdAt);
@@ -58,32 +58,36 @@ async function run() {
         return;
       }
 
+      const storiesStartDate = (await Promise.all(epicStories.map(s => getStoryStartedAt(projectId, s.id)))).filter(d => d);
+      const firstStoryStartedAt = storiesStartDate.length > 0 ? storiesStartDate.sort(dateSort)[0] : undefined;
+
       const totAcceptedStories = epicStories.filter(e => e.currentState === "accepted").length;
       const completedPercent = totStories > 0 ? Math.ceil(100.0 * totAcceptedStories / totStories) : 0;
 
-      const storiesCreatedTimes = epicStories.map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1);
+      const storiesCreatedTimes = epicStories.map(s => s.createdAt).sort(dateSort);
 
-      const firstStoryCreatedAt = storiesCreatedTimes[0];
+      const firstStoryCreatedAt = firstStoryStartedAt || storiesCreatedTimes[0];
 
       const epicCreatedAt = moment(firstStoryCreatedAt);
 
       const epicName = `${epic.name} (${completedPercent}% completa)`;
 
       if(totAcceptedStories == totStories) {
-        const storiesAcceptedTimes = epicStories.map(s => s.acceptedAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1);
+        const storiesAcceptedTimes = epicStories.map(s => s.acceptedAt).sort(dateSort);
         const lastStoryUpdatedAt = storiesAcceptedTimes[storiesAcceptedTimes.length - 1]
         const epicCompletedAt = moment(lastStoryUpdatedAt);
         const epicDuration = moment.duration(epicCompletedAt.diff(epicCreatedAt));
         const epicDurationInDays = Math.ceil(epicDuration.asDays());
-        console.log(`[${epicName}] as [${epic.id}] starts the ${epicCreatedAt.format(dateFormat)} and lasts ${epicDurationInDays} days`);
+        return(`[${epicName}] as [${epic.id}] starts the ${epicCreatedAt.format(dateFormat)} and lasts ${epicDurationInDays} days`);
       } else {
         const epicProjectedCompletion = moment(epic.projectedCompletion);
         const epicDuration = moment.duration(epicProjectedCompletion.diff(epicCreatedAt));
         const epicDurationInDays = Math.ceil(epicDuration.asDays());
-        console.log(`[${epicName}] as [${epic.id}] starts the ${epicCreatedAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in LightGray/Green`);
+        return(`[${epicName}] as [${epic.id}] starts the ${epicCreatedAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in LightGray/Green`);
       }
     }
-  });
+  }));
+  console.log(items.join("\n"));
   console.log(extra);
   console.log("@endgantt");
 }
@@ -123,6 +127,7 @@ async function getEpic(projectId, epicId) {
   });
 }
 
+/*
 async function getProjectStories(projectId) {
   return new Promise((res, rej) => {
     client.project(projectId).stories.all({limit: 999}, (err, stories) => {
@@ -133,8 +138,9 @@ async function getProjectStories(projectId) {
     });
   });
 }
+*/
 
-async function getProjectStoriesPage(projectId) {
+async function getProjectStories(projectId) {
   const limit = 100;
   var offset = 0;
   const stories = [];
@@ -156,6 +162,31 @@ async function getProjectStoriesPage(projectId, limit, offset) {
         return rej(err);
       }
       res(stories);
+    });
+  });
+}
+
+async function getStoryStartedAt(projectId, storyId) {
+  const activity = await getStoryActivity(projectId, storyId);
+  if(!activity) {
+    return undefined;
+  }
+  var occurredAt = undefined;
+  activity.forEach(a => {
+    if(a.highlight == "started") {
+      occurredAt = a.occurredAt;
+    }
+  });
+  return occurredAt;
+}
+
+async function getStoryActivity(projectId, storyId) {
+  return new Promise ((res, rej) => {
+    client.project(projectId).story(storyId).activity.all((err, activity) => {
+      if(err) {
+        return rej(err);
+      }
+      res(activity);
     });
   });
 }
