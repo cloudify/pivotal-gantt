@@ -24,8 +24,10 @@ async function run() {
   const stories = await getProjectStories(projectId);
   console.error("Getting project epics");
   const epics = await getProjectEpics(projectId);
+  console.error("Getting iterations")
+  const iterations = await getProjectIterations(projectId);
 
-  console.error(`#stories=${stories.length} #epics=${epics.length}`);
+  console.error(`#stories=${stories.length} #epics=${epics.length} #iterations=${iterations.length}`);
 
   console.error("Processing stories");
   const storiesForLabel = {};
@@ -39,6 +41,16 @@ async function run() {
     })
   });
 
+  const iterationNumberForStoryId = {};
+  const iterationForNumber = {};
+  iterations.forEach(iteration => {
+    iterationForNumber[iteration.number] = iteration;
+    const iterationStories = Array.isArray(iteration.stories) ? iteration.stories : [];
+    iterationStories.forEach(story => {
+      iterationNumberForStoryId[story.id] = iteration.number;
+    })
+  });
+
   // console.log(storiesForLabel['epic-technical-debt'].map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1));
 
   console.log("@startgantt");
@@ -46,13 +58,13 @@ async function run() {
   console.log(`Project starts the ${projectCreatedAt.format(dateFormat)}`);
   const items = await Promise.all(epics.map(async epic => {
     if(epic.description && epic.description.indexOf("*SKIP_GANTT*") > -1) {
-      console.error(`Skipping epic: ${epic.name}`);
+      // console.error(`Skipping epic: ${epic.name}`);
       return;
     }
 
     if(epic.createdAt && (epic.projectedCompletion || epic.completedAt)) {
       // const epicCreatedAt = moment(epic.createdAt);
-      const epicStories = storiesForLabel[epic.label.name] || [];
+      const epicStories = storiesForLabel[epic.label.name].filter(s => s.currentState !== "unscheduled") || [];
       const totStories = epicStories.length;
       if(totStories == 0) {
         return;
@@ -61,29 +73,36 @@ async function run() {
       const storiesStartDate = (await Promise.all(epicStories.map(s => getStoryStartedAt(projectId, s.id)))).filter(d => d);
       const firstStoryStartedAt = storiesStartDate.length > 0 ? storiesStartDate.sort(dateSort)[0] : undefined;
 
+      const storiesPlannedIteration = epicStories.map(s => iterationNumberForStoryId[s.id]).filter(i => i >= 0).sort((a,b) => a - b);
+      const firstStoryPlannedAt = storiesPlannedIteration.length > 0 ? iterationForNumber[storiesPlannedIteration[0]].start : undefined;
+
       const totAcceptedStories = epicStories.filter(e => e.currentState === "accepted").length;
       const completedPercent = totStories > 0 ? Math.ceil(100.0 * totAcceptedStories / totStories) : 0;
 
       const storiesCreatedTimes = epicStories.map(s => s.createdAt).sort(dateSort);
 
-      const firstStoryCreatedAt = firstStoryStartedAt || storiesCreatedTimes[0];
+      const firstStoryTimestamp = firstStoryStartedAt || firstStoryPlannedAt; // || storiesCreatedTimes[0];
 
-      const epicCreatedAt = moment(firstStoryCreatedAt);
+      // console.error(firstStoryTimestamp);
+      const epicStartsAt = projectCreatedAt.isAfter(firstStoryTimestamp) ? projectCreatedAt : moment(firstStoryTimestamp);
 
-      const epicName = `${epic.name} (${completedPercent}% completa)`;
+      const { color, description } = getCompletionPercentDescriptionAndColor(completedPercent);
+      const epicName = `${epic.name} ${description}`;
 
       if(totAcceptedStories == totStories) {
         const storiesAcceptedTimes = epicStories.map(s => s.acceptedAt).sort(dateSort);
         const lastStoryUpdatedAt = storiesAcceptedTimes[storiesAcceptedTimes.length - 1]
         const epicCompletedAt = moment(lastStoryUpdatedAt);
-        const epicDuration = moment.duration(epicCompletedAt.diff(epicCreatedAt));
+        const epicDuration = moment.duration(epicCompletedAt.diff(epicStartsAt));
         const epicDurationInDays = Math.ceil(epicDuration.asDays());
-        return(`[${epicName}] as [${epic.id}] starts the ${epicCreatedAt.format(dateFormat)} and lasts ${epicDurationInDays} days`);
+        return(`[${epicName}] as [${epic.id}] starts the ${epicStartsAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in ${color}`);
       } else {
         const epicProjectedCompletion = moment(epic.projectedCompletion);
-        const epicDuration = moment.duration(epicProjectedCompletion.diff(epicCreatedAt));
+        const epicDuration = moment.duration(epicProjectedCompletion.diff(epicStartsAt));
+        // console.log(`${epicStartsAt} to ${epicProjectedCompletion} (${epic.projectedCompletion})`);
         const epicDurationInDays = Math.ceil(epicDuration.asDays());
-        return(`[${epicName}] as [${epic.id}] starts the ${epicCreatedAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in LightGray/Green`);
+        // console.log(`${epicDuration} -> ${epicDurationInDays}`);
+        return(`[${epicName}] as [${epic.id}] starts the ${epicStartsAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in ${color}`);
       }
     }
   }));
@@ -189,6 +208,36 @@ async function getStoryActivity(projectId, storyId) {
       res(activity);
     });
   });
+}
+
+async function getProjectIterations(projectId) {
+  return new Promise((res, rej) => {
+    client.project(projectId).iterations.all((err, iterations) => {
+      if(err) {
+        return rej(err);
+      }
+      res(iterations);
+    });
+  });
+}
+
+function getCompletionPercentDescriptionAndColor(p) {
+  if (p == 0) {
+    return {
+      color: "White/Black",
+      description: ""
+    };
+  } else if(p == 100) {
+    return {
+      color: "LightGreen/Black",
+      description: "(Completata)"
+    };
+  } else {
+    return {
+      color: "LightGray/Black",
+      description: `(In corso: ${p}%)`
+    };
+  }
 }
 
 run();
