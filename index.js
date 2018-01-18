@@ -95,19 +95,25 @@ async function run() {
         const epicCompletedAt = moment(lastStoryUpdatedAt);
         const epicDuration = moment.duration(epicCompletedAt.diff(epicStartsAt));
         const epicDurationInDays = Math.ceil(epicDuration.asDays());
-        return(`[${epicName}] as [${epic.id}] starts the ${epicStartsAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in ${color}`);
+        return({
+          text: `[${epicName}] as [${epic.id}] starts the ${epicStartsAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in ${color}`,
+          startsAt: moment(epicStartsAt).valueOf()
+        });
       } else {
         const epicProjectedCompletion = moment(epic.projectedCompletion);
         const epicDuration = moment.duration(epicProjectedCompletion.diff(epicStartsAt));
         // console.log(`${epicStartsAt} to ${epicProjectedCompletion} (${epic.projectedCompletion})`);
         const epicDurationInDays = Math.ceil(epicDuration.asDays());
         // console.log(`${epicDuration} -> ${epicDurationInDays}`);
-        return(`[${epicName}] as [${epic.id}] starts the ${epicStartsAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in ${color}`);
+        return({
+          text: `[${epicName}] as [${epic.id}] starts the ${epicStartsAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in ${color}`,
+          startsAt: epicStartsAt.valueOf()
+        });
       }
     }
   }));
-  console.log(items.join("\n"));
-  console.log(extra);
+  console.log(items.filter(i => i).sort((a,b) => a.startsAt - b.startsAt).map(i => i.text).join("\n"));
+  console.log(`${extra}`);
   console.log("@endgantt");
 }
 
