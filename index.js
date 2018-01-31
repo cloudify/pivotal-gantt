@@ -9,13 +9,14 @@ const dateSort = (a,b) => moment(a).isAfter(b) ? 1 : -1;
 const client = new tracker.Client(process.env.PIVOTAL_TRACKER_TOKEN);
 
 const projectId = process.argv[2];
+const outputType = process.argv[3]
 
-if(!projectId) {
-  console.error(`Usage ${process.argv[1]} projectId`);
+if(!projectId || (outputType != 'puml' && outputType != 'text')) {
+  console.error(`Usage ${process.argv[1]} projectId puml|text [extrafile]`);
   process.exit(-1);
 }
 
-const extra = process.argv[3] ? fs.readFileSync(process.argv[3]) : "";
+const extra = process.argv[4] ? fs.readFileSync(process.argv[3]) : "";
 
 async function run() {
   console.error("Getting project info");
@@ -53,15 +54,8 @@ async function run() {
 
   // console.log(storiesForLabel['epic-technical-debt'].map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1));
 
-  console.log("@startgantt");
   const projectCreatedAt = moment(project.createdAt); // moment(stories.map(s => s.createdAt).sort((a,b) => moment(a).isAfter(b) ? 1 : -1)[0]);
-  console.log(`Project starts the ${projectCreatedAt.format(dateFormat)}`);
   const items = await Promise.all(epics.map(async epic => {
-    if(epic.description && epic.description.indexOf("*SKIP_GANTT*") > -1) {
-      // console.error(`Skipping epic: ${epic.name}`);
-      return;
-    }
-
     if(epic.createdAt && (epic.projectedCompletion || epic.completedAt)) {
       // const epicCreatedAt = moment(epic.createdAt);
       const epicStories = storiesForLabel[epic.label.name].filter(s => s.currentState !== "unscheduled") || [];
@@ -96,7 +90,11 @@ async function run() {
         const epicDuration = moment.duration(epicCompletedAt.diff(epicStartsAt));
         const epicDurationInDays = Math.ceil(epicDuration.asDays());
         return({
-          text: `[${epicName}] as [${epic.id}] starts the ${epicStartsAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in ${color}`,
+          epicName,
+          epic,
+          epicStartsAt,
+          epicDurationInDays,
+          color,
           startsAt: moment(epicStartsAt).valueOf()
         });
       } else {
@@ -106,15 +104,79 @@ async function run() {
         const epicDurationInDays = Math.ceil(epicDuration.asDays());
         // console.log(`${epicDuration} -> ${epicDurationInDays}`);
         return({
-          text: `[${epicName}] as [${epic.id}] starts the ${epicStartsAt.format(dateFormat)} and lasts ${epicDurationInDays} days and is colored in ${color}`,
-          startsAt: epicStartsAt.valueOf()
+          epicName,
+          epic,
+          epicStartsAt,
+          epicDurationInDays,
+          color,
+          startsAt: moment(epicStartsAt).valueOf()
         });
       }
     }
   }));
-  console.log(items.filter(i => i).sort((a,b) => a.startsAt - b.startsAt).map(i => i.text).join("\n"));
-  console.log(`${extra}`);
-  console.log("@endgantt");
+  const data = {
+    project,
+    projectCreatedAt,
+    items: items.filter(i => i).sort((a,b) => a.startsAt - b.startsAt),
+    extra,
+    storiesForLabel
+  };
+
+  const outputGen = outputType == 'puml' ? pumlTemplate : textTemplate;
+
+  console.log(outputGen(data));
+}
+
+function pumlTemplate(data) {
+  const items = data.items.filter(e => !(e.epic.description && epic.description.indexOf("*SKIP_GANTT*") > -1)).map(e =>
+    `[${e.epicName}] as [${e.epic.id}] starts the ${e.epicStartsAt.format(dateFormat)} and lasts ${e.epicDurationInDays} days and is colored in ${e.color}`
+  ).join("\n");
+  return(`
+@startgantt
+Project starts the ${data.projectCreatedAt.format(dateFormat)}
+${items}
+${data.extra}
+@endgantt
+`);
+}
+
+function textTemplate(data) {
+  const items = data.items.filter(e => !(e.epic.description && e.epic.description.indexOf("*SKIP_TEXT*") > -1)).map(e => {
+    const epicLabel = e.epic.label.name;
+    const epicDescription = e.epic.description ? e.epic.description.replace("*SKIP_GANTT*", "") : undefined;
+    const stories = data.storiesForLabel[epicLabel].filter(s => s.currentState == "unstarted") || [];
+    if(stories.length == 0) {
+      return "";
+    }
+    const storiesMd = stories.map(s => `
+#### ${s.name} ([#${s.id}](${s.url}))
+
+${s.description ? s.description : `_TODO: la storia va descritta in dettaglio_`}
+`).join("\n");
+    return `
+## ${e.epic.name} ([#${e.epic.id}](${e.epic.url}))
+
+### Descrizione
+
+${epicDescription ? epicDescription : `_TODO: la EPIC va descritta in dettaglio_`}
+
+### Storie
+
+${storiesMd}
+
+    `
+  }).join("\n");
+
+  return `
+
+# Progetto: ${data.project.name}
+
+_Inizio del progetto: ${data.projectCreatedAt.locale('it').format(dateFormat)}_
+
+# Linee di attività
+
+${items}
+`;
 }
 
 async function getProjectInfo(projectId) {
@@ -246,4 +308,4 @@ function getCompletionPercentDescriptionAndColor(p) {
   }
 }
 
-run();
+run().catch(e => console.error(e));
